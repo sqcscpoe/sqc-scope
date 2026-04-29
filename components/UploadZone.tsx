@@ -27,13 +27,10 @@ export default function UploadZone({
       if (singleFile) {
         onFilesChange(acceptedFiles.slice(0, 1));
       } else {
-        onFilesChange(prev => {
-          const combined = [...prev, ...acceptedFiles];
-          return combined.slice(0, maxFiles);
-        });
+        onFilesChange([...files, ...acceptedFiles].slice(0, maxFiles));
       }
     },
-    [singleFile, maxFiles, onFilesChange]
+    [singleFile, maxFiles, onFilesChange, files]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
