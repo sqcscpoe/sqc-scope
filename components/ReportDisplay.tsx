@@ -22,7 +22,7 @@ export default function ReportDisplay({
   const [copied, setCopied] = useState(false);
 
   const isReady = report.includes('LISTO PARA M1');
-  const hasBlocking = report.includes('FALLA BLOQUEANTE') || report.includes('\u274C');
+  const hasBlocking = report.includes('FALLA BLOQUEANTE') || report.includes('❌');
 
   const handleCopy = async () => {
     try {
@@ -30,6 +30,7 @@ export default function ReportDisplay({
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch {
+      // Fallback for older browsers
       const textarea = document.createElement('textarea');
       textarea.value = report;
       document.body.appendChild(textarea);
@@ -45,6 +46,7 @@ export default function ReportDisplay({
     window.print();
   };
 
+  // Parse verdict from report
   const getVerdict = () => {
     if (report.includes('LISTO PARA M1')) return 'LISTO PARA M1';
     if (report.includes('NO LISTO')) return 'NO LISTO — CORRECCIONES REQUERIDAS';
@@ -60,7 +62,7 @@ export default function ReportDisplay({
           : 'bg-amber-50 border-amber-300'
       }`}>
         <div className="flex items-center gap-3">
-          <span className="text-3xl">{isReady ? '\u2705' : '\u26A0\uFE0F'}</span>
+          <span className="text-3xl">{isReady ? '✅' : '⚠️'}</span>
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Veredicto General</p>
             <p className={`text-lg font-bold mt-0.5 ${isReady ? 'text-green-700' : 'text-amber-700'}`}>
@@ -75,11 +77,11 @@ export default function ReportDisplay({
       <div className="flex flex-wrap gap-2 no-print">
         {emailSent ? (
           <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-full text-xs text-blue-700 font-medium">
-            <span>\u{1F4E7}</span> Reporte enviado a {recipientEmail}
+            <span>📧</span> Reporte enviado a {recipientEmail}
           </div>
         ) : (
           <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-200 rounded-full text-xs text-gray-500">
-            <span>\u{1F4E7}</span> Email no enviado (revisar configuración)
+            <span>📧</span> Email no enviado (revisar configuración)
           </div>
         )}
         {driveFolder && (
@@ -89,7 +91,7 @@ export default function ReportDisplay({
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-full text-xs text-green-700 font-medium hover:bg-green-100 transition-colors"
           >
-            <span>\u{1F4C1}</span> Ver en Google Drive
+            <span>📁</span> Ver en Google Drive
           </a>
         )}
       </div>
@@ -116,7 +118,7 @@ export default function ReportDisplay({
               onClick={handlePrint}
               className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-[#B7960C]/40 hover:text-[#B7960C] transition-all font-medium"
             >
-              \u{1F5A8} PDF
+              🖨 PDF
             </button>
           </div>
         </div>
@@ -145,7 +147,7 @@ export default function ReportDisplay({
           onClick={handleCopy}
           className="btn-secondary flex items-center justify-center gap-2"
         >
-          {copied ? '✓' : '\u{1F4CB}'} Copiar
+          {copied ? '✓' : '📋'} Copiar
         </button>
       </div>
     </div>
