@@ -68,7 +68,7 @@ export default function UploadZone({
 
         {files.length === 0 || !singleFile ? (
           <>
-            <div className="text-3xl mb-2">{isDragActive ? '\u{1F4C2}' : icon}</div>
+            <div className="text-3xl mb-2">{isDragActive ? '📂' : icon}</div>
             <p className="text-sm font-medium text-gray-600">
               {isDragActive ? 'Suelta aquí' : label}
             </p>
@@ -79,7 +79,7 @@ export default function UploadZone({
           </>
         ) : (
           <div className="flex items-center gap-3">
-            <span className="text-2xl">\u{1F4C4}</span>
+            <span className="text-2xl">📄</span>
             <div className="text-left flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-700 truncate">{files[0].name}</p>
               <p className="text-xs text-gray-400">{(files[0].size / 1024 / 1024).toFixed(2)} MB</p>
@@ -111,7 +111,7 @@ export default function UploadZone({
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">
-                    <span className="text-2xl">\u{1F4C4}</span>
+                    <span className="text-2xl">📄</span>
                   </div>
                 )}
                 <button
@@ -124,7 +124,7 @@ export default function UploadZone({
                 </button>
                 <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[9px]
                                 text-center py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  #${idx + 1}
+                  #{idx + 1}
                 </div>
               </div>
             );
