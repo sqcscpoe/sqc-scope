@@ -281,7 +281,7 @@ export default function HomePage() {
                         className={`py-3 px-2 rounded-xl border-2 text-xs font-medium transition-all duration-200 text-center
                           ${formData.system === sys
                             ? 'border-[#B7960C] bg-[#B7960C]/10 text-[#B7960C]'
-                            : 'border-gray-200 text-gray-600 hover:border-[#B7960C]/40'
+      2                     : 'border-gray-200 text-gray-600 hover:border-[#B7960C]/40'
                           }`}
                       >
                         {sys === 'Enphase' && 'âš¡ '}
@@ -327,7 +327,7 @@ export default function HomePage() {
               {photos.length > 0 && (
                 <p className="text-xs text-[#B7960C] mt-2 font-medium">
                   âœ“ {photos.length} archivo{photos.length !== 1 ? 's' : ''} seleccionado{photos.length !== 1 ? 's' : ''}
-                  {photos.length > 100 && <span className="text-amber-600"> à€” Solo se procesarÃ¡n los primeros 100</span>}
+                  {photos.length > 100 && <span className="text-amber-600"> â€” Solo se procesarÃ¡n los primeros 100</span>}
                 </p>
               )}
             </div>
