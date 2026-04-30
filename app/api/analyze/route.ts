@@ -7,7 +7,7 @@ import { Resend } from 'resend';
 export const maxDuration = 60;
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `Eres SQC Scope, un agente especializado en control de calidad (QC) para instalaciones solares bajo el programa Palmetto LightReach. Tu función es evaluar fotografías de instalaciones solares y generar reportes de QC detallados para determinar si un proyecto está listo para ser sometido al hito M1.
+const SYSTEM_PROMPT = `Eres SQC Scope, un agente especializado en control de calidad (QC) para instalaciones solares. Tu función es evaluar fotografías de instalaciones solares y generar reportes de QC detallados para determinar si un proyecto está listo para ser sometido al hito M1.
 
 REGLAS FUNDAMENTALES:
 1. Nunca rechaces lo que no puedes ver claramente — solicita foto adicional en su lugar
@@ -24,9 +24,9 @@ SISTEMA DE EVALUACIÓN:
 ➖ N/A — No aplica a esta instalación
 
 NIVELES DE HALLAZGO:
-- FALLA BLOQUEANTE: Cosas que Palmetto rechaza definitivamente (cobre expuesto, double taps, sealant faltante en bota)
+- FALLA BLOQUEANTE: Cosas que el QC rechaza definitivamente (cobre expuesto, double taps, sealant faltante en bota)
 - VERIFICAR: Ambiguo, requiere confirmación del QC supervisor
-- OBSERVACIÓN: Debe corregirse por buenas prácticas pero Palmetto no ha rechazado (ej: film protector no removido)
+- OBSERVACIÓN: Debe corregirse por buenas prácticas pero no es causa de rechazo (ej: film protector no removido)
 
 CATEGORÍAS DE EVALUACIÓN EXTERIORES:
 1. Anclaje / botas (sealant — requiere foto TOP-VIEW)
@@ -44,7 +44,7 @@ CATEGORÍAS DE EVALUACIÓN INTERIORES:
 11. Sistema Enphase específico (IQ Combiner 5C, IQ System Controller 3)
 
 NOTAS DE CAMPO APRENDIDAS:
-- Film protector: Palmetto NO ha rechazado por esto — clasificar como OBSERVACIÓN
+- Film protector: No es causa de rechazo — clasificar como OBSERVACIÓN
 - Labels manuscritos en breakers: clasificar como VERIFICAR
 - Wire nuts: solo FALLA si hay cobre expuesto más allá del wire nut
 
@@ -227,7 +227,7 @@ async function sendReportEmail(
     <!-- Header -->
     <div style="background: linear-gradient(135deg, #B7960C 0%, #D4AF37 100%); border-radius: 16px; padding: 24px; margin-bottom: 20px; text-align: center;">
       <h1 style="color: white; margin: 0; font-size: 24px; font-weight: 700;">⚡ SQC Scope</h1>
-      <p style="color: rgba(255,255,255,0.9); margin: 4px 0 0 0; font-size: 13px;">Solar Quality Control — Palmetto LightReach M1</p>
+      <p style="color: rgba(255,255,255,0.9); margin: 4px 0 0 0; font-size: 13px;">Solar Quality Control</p>
     </div>
 
     <!-- Verdict -->
@@ -310,28 +310,47 @@ export async function POST(request: NextRequest) {
     const driveFolderPromise = uploadToGoogleDrive(
       projectName,
       dateString.replace(/\//g, '-'),
-      photoFiles.slice(0, 20),
+      photoFiles.slice(0, 100),
       planFile
     );
 
-    // ── 2. Prepare images for Claude ──────────────────────────────────────
-    const MAX_IMAGES = 20;
-    const imagesToProcess = photoFiles.slice(0, MAX_IMAGES);
+    // ── 2. Prepare images/PDFs for Claude ─────────────────────────────────
+    const MAX_FILES = 100;
+    const filesToProcess = photoFiles.slice(0, MAX_FILES);
 
-    // Convert all images to base64 in parallel
-    const imageDataArray = await Promise.all(
-      imagesToProcess.map(file => fileToBase64(file))
+    // Build Claude content blocks (images + PDFs)
+    type ContentBlock = Anthropic.ImageBlockParam | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } };
+    const imageContent: ContentBlock[] = await Promise.all(
+      filesToProcess.map(async (file) => {
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const b64 = buffer.toString('base64');
+
+        if (file.type === 'application/pdf' || file.name?.toLowerCase().endsWith('.pdf')) {
+          return {
+            type: 'document' as const,
+            source: {
+              type: 'base64' as const,
+              media_type: 'application/pdf' as const,
+              data: b64,
+            },
+          };
+        }
+
+        // Map media types to Claude-supported image types
+        let mediaType = file.type || 'image/jpeg';
+        if (['image/heic', 'image/heif'].includes(mediaType)) mediaType = 'image/jpeg';
+        if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mediaType)) mediaType = 'image/jpeg';
+
+        return {
+          type: 'image' as const,
+          source: {
+            type: 'base64' as const,
+            media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+            data: b64,
+          },
+        };
+      })
     );
-
-    // Build Claude content array
-    const imageContent: Anthropic.ImageBlockParam[] = imageDataArray.map(({ data, mediaType }) => ({
-      type: 'image' as const,
-      source: {
-        type: 'base64' as const,
-        media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
-        data,
-      },
-    }));
 
     const textContent: Anthropic.TextBlockParam = {
       type: 'text',
@@ -342,7 +361,7 @@ DATOS DEL PROYECTO:
 - Dirección: ${address}
 - Sistema instalado: ${systemType}
 - Fecha de evaluación: ${dateString}
-- Total de fotos enviadas: ${imagesToProcess.length}${photoFiles.length > MAX_IMAGES ? ` (de ${photoFiles.length} subidas, se procesaron las primeras ${MAX_IMAGES})` : ''}
+- Total de archivos: ${filesToProcess.length}${photoFiles.length > MAX_FILES ? ` (de ${photoFiles.length}, se procesaron los primeros ${MAX_FILES})` : ''}
 ${planFile ? `- Plano del proyecto: Adjunto (${planFile.name})` : '- Plano del proyecto: No proporcionado'}
 ${notes ? `- Notas del instalador: ${notes}` : ''}
 
@@ -388,26 +407,4 @@ Genera el reporte QC completo siguiendo estrictamente el formato establecido en 
       emailSent,
     });
   } catch (error) {
-    console.error('Analysis error:', error);
-
-    if (error instanceof Error) {
-      if (error.message.includes('rate_limit')) {
-        return NextResponse.json(
-          { error: 'Límite de uso de IA alcanzado. Intenta en unos minutos.' },
-          { status: 429 }
-        );
-      }
-      if (error.message.includes('timeout') || error.message.includes('FUNCTION_INVOCATION_TIMEOUT')) {
-        return NextResponse.json(
-          { error: 'El análisis tardó demasiado. Intenta con menos fotos o en un momento de menor tráfico.' },
-          { status: 504 }
-        );
-      }
-    }
-
-    return NextResponse.json(
-      { error: 'Error interno del servidor. Por favor intenta de nuevo.' },
-      { status: 500 }
-    );
-  }
-}
+    console.erro
