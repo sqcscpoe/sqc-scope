@@ -76,6 +76,55 @@ export default function HomePage() {
     return interval;
   }, []);
 
+  /** Compress an image file using canvas to stay within size limits */
+  const compressImage = async (file: File, targetBytes = 700_000): Promise<File> => {
+    // Skip non-images or small files
+    if (!file.type.startsWith('image/') || file.size <= targetBytes) return file;
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const canvas = document.createElement('canvas');
+
+        // Scale down if very large
+        let { width, height } = img;
+        const MAX_DIM = 1920;
+        if (width > MAX_DIM || height > MAX_DIM) {
+          const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Try progressively lower quality until small enough
+        let quality = 0.85;
+        const tryCompress = () => {
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) { resolve(file); return; }
+              if (blob.size <= targetBytes || quality <= 0.3) {
+                resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+              } else {
+                quality -= 0.1;
+                tryCompress();
+              }
+            },
+            'image/jpeg',
+            quality
+          );
+        };
+        tryCompress();
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  };
+
   const handleAnalyze = async () => {
     if (!isFormValid()) return;
 
@@ -91,9 +140,17 @@ export default function HomePage() {
       data.append('email', formData.email);
       data.append('notes', formData.notes);
 
-      // Append photos (max 20)
-      const photosToUpload = photos.slice(0, 20);
-      for (const photo of photosToUpload) {
+      // Compress images dynamically so total payload stays under 4MB
+      // PDFs (Site Capture) are passed as-is
+      const photosToUpload = photos.slice(0, 100);
+      const imageCount = photosToUpload.filter(p => p.type.startsWith('image/')).length;
+      const targetBytesPerImage = imageCount > 0
+        ? Math.max(80_000, Math.min(700_000, Math.floor(3_500_000 / imageCount)))
+        : 700_000;
+      const compressed = await Promise.all(
+        photosToUpload.map(p => p.type === 'application/pdf' ? p : compressImage(p, targetBytesPerImage))
+      );
+      for (const photo of compressed) {
         data.append('photos', photo);
       }
 
@@ -110,8 +167,18 @@ export default function HomePage() {
       clearInterval(stepInterval);
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Error al procesar el análisis');
+        // Handle non-JSON error responses (e.g. 413 from Vercel)
+        let errMsg = 'Error al procesar el análisis';
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const errorData = await response.json().catch(() => ({}));
+          errMsg = errorData.error || errMsg;
+        } else if (response.status === 413) {
+          errMsg = 'Las fotos son demasiado grandes. Intenta con menos fotos o imágenes más pequeñas.';
+        } else {
+          errMsg = `Error del servidor (${response.status}). Intenta de nuevo.`;
+        }
+        throw new Error(errMsg);
       }
 
       const resultData = await response.json();
@@ -152,7 +219,7 @@ export default function HomePage() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-gray-900 leading-tight">SQC Scope</h1>
-            <p className="text-xs text-[#B7960C] font-medium leading-tight">Solar Quality Control — Palmetto LightReach M1</p>
+            <p className="text-xs text-[#B7960C] font-medium leading-tight">Solar Quality Control</p>
           </div>
         </div>
       </header>
@@ -244,20 +311,23 @@ export default function HomePage() {
             <div className="card">
               <p className="section-label">Fotos de la Instalación</p>
               <p className="text-xs text-gray-500 mb-3">
-                Sube todas las fotos del proyecto. Máximo 20 imágenes. Formatos: JPG, PNG, HEIC, WebP.
+                Sube fotos individuales (JPG, PNG, HEIC, WebP) o un reporte PDF de Site Capture. Hasta 100 archivos.
               </p>
               <UploadZone
-                accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp'] }}
+                accept={{
+                  'image/*': ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp'],
+                  'application/pdf': ['.pdf'],
+                }}
                 files={photos}
                 onFilesChange={setPhotos}
-                maxFiles={20}
-                label="Arrastra fotos aquí o toca para seleccionar"
+                maxFiles={100}
+                label="Arrastra fotos o PDF de Site Capture aquí"
                 icon="📷"
               />
               {photos.length > 0 && (
                 <p className="text-xs text-[#B7960C] mt-2 font-medium">
-                  ✓ {photos.length} foto{photos.length !== 1 ? 's' : ''} seleccionada{photos.length !== 1 ? 's' : ''}
-                  {photos.length > 20 && <span className="text-amber-600"> — Solo se procesarán las primeras 20</span>}
+                  ✓ {photos.length} archivo{photos.length !== 1 ? 's' : ''} seleccionado{photos.length !== 1 ? 's' : ''}
+                  {photos.length > 100 && <span className="text-amber-600"> ��� Solo se procesarán los primeros 100</span>}
                 </p>
               )}
             </div>
@@ -344,66 +414,4 @@ export default function HomePage() {
 
               {/* Step progress */}
               <div className="space-y-2 text-left mb-6">
-                {ANALYZING_STEPS.map((step, idx) => (
-                  <div key={idx} className={`flex items-center gap-2 text-sm transition-all duration-300
-                    ${idx < currentStep ? 'text-green-600' : idx === currentStep ? 'text-[#B7960C] font-medium' : 'text-gray-300'}`}>
-                    <span className="w-4 h-4 flex-shrink-0 text-xs">
-                      {idx < currentStep ? '✓' : idx === currentStep ? '→' : '○'}
-                    </span>
-                    {step}
-                  </div>
-                ))}
-              </div>
-
-              <div className="w-full bg-gray-100 rounded-full h-1.5">
-                <div
-                  className="h-1.5 rounded-full transition-all duration-1000"
-                  style={{
-                    width: `${Math.min(((currentStep + 1) / ANALYZING_STEPS.length) * 100, 95)}%`,
-                    background: 'linear-gradient(90deg, #B7960C, #D4AF37)',
-                  }}
-                />
-              </div>
-              <p className="text-xs text-gray-400 mt-3">Por favor espera, esto puede tomar hasta 60 segundos</p>
-            </div>
-          </div>
-        )}
-
-        {/* ──────────────── ERROR STATE ──────────────── */}
-        {appState === 'error' && (
-          <div className="flex flex-col items-center justify-center min-h-[50vh] px-4">
-            <div className="card w-full max-w-sm text-center">
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-3xl">⚠️</span>
-              </div>
-              <h2 className="text-lg font-bold text-gray-900 mb-2">Error en el análisis</h2>
-              <p className="text-sm text-red-600 mb-6 bg-red-50 rounded-xl p-3">{errorMessage}</p>
-              <button onClick={handleReset} className="btn-gold w-full">
-                Intentar de nuevo
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ──────────────── RESULT STATE ──────────────── */}
-        {appState === 'result' && result && (
-          <ReportDisplay
-            report={result.report}
-            projectName={formData.projectName}
-            emailSent={result.emailSent}
-            recipientEmail={formData.email}
-            driveFolder={result.driveFolder}
-            onReset={handleReset}
-          />
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 py-2 px-4 no-print">
-        <p className="text-center text-xs text-gray-400">
-          SQC Scope · Palmetto LightReach M1 · Puerto Rico
-        </p>
-      </footer>
-    </div>
-  );
-}
+                {ANA
