@@ -3,6 +3,7 @@ import{useState,useRef,useEffect}from'react'
 import{useSession}from'next-auth/react'
 import{useRouter}from'next/navigation'
 const BLOCKS=['Techo y arreglos','Cableado y tubería','Junction box','Perforaciones','Equipo eléctrico','Gateway / Inversor','Batería y RSS','Medidas críticas','Números de serie']
+
 export default function ReviewPage(){
 const{data:session,status}=useSession()
 const router=useRouter()
@@ -10,6 +11,7 @@ const[messages,setMessages]=useState<any[]>([])
 const[input,setInput]=useState('')
 const[pdfFile,setPdfFile]=useState<File|null>(null)
 const[pdfFileId,setPdfFileId]=useState<string|null>(null)
+const[uploadProgress,setUploadProgress]=useState<string>('')
 const[projectName,setProjectName]=useState('')
 const[loading,setLoading]=useState(false)
 const[saved,setSaved]=useState(false)
@@ -17,54 +19,85 @@ const[hasReport,setHasReport]=useState(false)
 const[phase,setPhase]=useState<'upload'|'chat'>('upload')
 const bottomRef=useRef<HTMLDivElement>(null)
 const fileRef=useRef<HTMLInputElement>(null)
+
 useEffect(()=>{if(status==='unauthenticated')router.push('/login')},[status,router])
 useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:'smooth'})},[messages])
+
 function handleFile(file:File){
 if(!file||file.type!=='application/pdf')return
 setPdfFile(file)}
-async function startAnalysis(){if(!pdfFile||!projectName.trim())return;setPhase('chat');await send('REVISAR PAQUETE',true)}
-async function send(text?:string,withPdf=false){
-const msg=text||input.trim();if(!msg||loading)return
-setInput('');setLoading(true)
+
+async function uploadPdfToAnthropic(file:File):Promise<string>{
+setUploadProgress('Obteniendo token...')
+const tokenRes=await fetch('/api/upload-token')
+if(!tokenRes.ok)throw new Error('No se pudo obtener token')
+const{apiKey}=await tokenRes.json()
+
+setUploadProgress('Subiendo PDF a Anthropic ('+(file.size/1024/1024).toFixed(1)+' MB)...')
+const fd=new FormData()
+fd.append('file',file)
+const uploadRes=await fetch('https://api.anthropic.com/v1/files',{
+method:'POST',
+headers:{'x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-beta':'files-api-2025-04-14'},
+body:fd
+})
+if(!uploadRes.ok){
+const err=await uploadRes.text()
+throw new Error('Error subiendo: '+err.slice(0,200))}
+const data=await uploadRes.json()
+setUploadProgress('')
+return data.id}
+
+async function startAnalysis(){
+if(!pdfFile||!projectName.trim())return
+setPhase('chat')
+setLoading(true)
+try{
+const fileId=await uploadPdfToAnthropic(pdfFile)
+setPdfFileId(fileId)
+await send('REVISAR PAQUETE',fileId)
+}catch(err:any){
+setMessages([{role:'assistant',content:'Error subiendo PDF: '+err.message,streaming:false}])
+setLoading(false)}}
+
+async function send(text?:string,fileIdOverride?:string){
+const msg=text||input.trim()
+if(!msg||(loading&&!fileIdOverride))return
+setInput('')
+setLoading(true)
+
 const userMsg={role:'user',content:msg}
 const asstMsg={role:'assistant',content:'',streaming:true}
 setMessages(prev=>[...prev,userMsg,asstMsg])
+
 const history=messages.map(m=>({role:m.role,content:m.content}))
+const fileId=fileIdOverride||pdfFileId
+
 try{
-let res
-if(withPdf&&pdfFile){
-const fd=new FormData()
-fd.append('pdf',pdfFile)
-fd.append('message',msg)
-fd.append('history',JSON.stringify(history))
-res=await fetch('/api/analyze',{method:'POST',body:fd})
-}else{
-res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
-body:JSON.stringify({message:msg,history,pdfFileId})})
-}
+const res=await fetch('/api/analyze',{
+method:'POST',
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify({message:msg,history,pdfFileId:fileId})})
 if(!res.ok)throw new Error(await res.text())
-const reader=res.body!.getReader();const decoder=new TextDecoder();let full='';let displayed=''
-while(true){const{done,value}=await reader.read();if(done)break
-const chunk=decoder.decode(value,{stream:true})
-full+=chunk
-// Extract __FILE_ID__:xxx__ if present
-const fileIdMatch=full.match(/__FILE_ID__:([^_]+)__\n?/)
-if(fileIdMatch&&!pdfFileId){
-setPdfFileId(fileIdMatch[1])
-displayed=full.replace(/__FILE_ID__:[^_]+__\n?/,'')
-}else{
-displayed=full.replace(/__FILE_ID__:[^_]+__\n?/,'')
-}
-setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:displayed,streaming:true};return u})}
-const finalContent=full.replace(/__FILE_ID__:[^_]+__\n?/,'')
-setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:finalContent,streaming:false};return u})
-if(finalContent.includes('---FIN_REPORTE---'))setHasReport(true)
-}catch(err:any){setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:'Error: '+err.message,streaming:false};return u})}
+const reader=res.body!.getReader()
+const decoder=new TextDecoder()
+let full=''
+while(true){
+const{done,value}=await reader.read()
+if(done)break
+full+=decoder.decode(value,{stream:true})
+setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:full,streaming:true};return u})}
+setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:full,streaming:false};return u})
+if(full.includes('---FIN_REPORTE---'))setHasReport(true)
+}catch(err:any){
+setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:'Error: '+err.message,streaming:false};return u})}
 finally{setLoading(false)}}
+
 async function saveReport(){
 const full=messages.filter(m=>m.role==='assistant').map(m=>m.content).join('\n')
 const res=await fetch('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rawReport:full,projectName,pdfName:pdfFile?.name})})
 if(res.ok)setSaved(true)}
+
 function renderMsg(content:string){
 return content.split('\n').map((line,i)=>{
 let color='var(--text)'
@@ -73,7 +106,9 @@ else if(line.includes('DISQUALIFYING'))color='var(--red)'
 else if(line.includes('REJECTION'))color='var(--orange)'
 else if(line.startsWith('Acción:'))color='#E8B820'
 return<span key={i} style={{display:'block',minHeight:'1.4em',color}}>{line}</span>})}
+
 if(status!=='authenticated')return null
+
 if(phase==='upload')return(
 <div style={{minHeight:'100vh',background:'var(--dark)'}}>
 <nav style={{height:56,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 24px',background:'var(--dark2)',borderBottom:'1px solid var(--border)'}}>
@@ -91,13 +126,14 @@ style={{width:'100%',padding:'12px 16px',background:'var(--dark2)',border:'1px s
 style={{border:`2px dashed ${pdfFile?'var(--gold)':'var(--border)'}`,borderRadius:'var(--radius-lg)',padding:'48px 32px',textAlign:'center',cursor:'pointer',marginBottom:24,background:pdfFile?'var(--gold-bg)':'var(--dark2)',transition:'all 0.2s'}}>
 <input ref={fileRef} type="file" accept="application/pdf" onChange={e=>e.target.files&&handleFile(e.target.files[0])} style={{display:'none'}}/>
 {pdfFile?(<><div style={{fontSize:36,marginBottom:8}}>📄</div><div style={{fontSize:15,fontWeight:500,color:'var(--gold)',marginBottom:4}}>{pdfFile.name}</div><div style={{fontSize:13,color:'var(--text-dim)'}}>{(pdfFile.size/1024/1024).toFixed(1)} MB · Click para cambiar</div></>)
-:(<><div style={{fontSize:36,marginBottom:12}}>☁️</div><div style={{fontSize:16,fontWeight:500,marginBottom:8}}>Arrastra el Site Capture PDF aquí</div><div style={{fontSize:13,color:'var(--text-dim)'}}>o haz click para seleccionar</div><div style={{fontSize:12,color:'var(--text-dimmer)',marginTop:8}}>PDF · hasta 100MB</div></>)}</div>
+:(<><div style={{fontSize:36,marginBottom:12}}>☁️</div><div style={{fontSize:16,fontWeight:500,marginBottom:8}}>Arrastra el Site Capture PDF aquí</div><div style={{fontSize:13,color:'var(--text-dim)'}}>o haz click para seleccionar</div><div style={{fontSize:12,color:'var(--text-dimmer)',marginTop:8}}>PDF · sin límite de tamaño</div></>)}</div>
 <div style={{background:'var(--dark2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,marginBottom:28}}>
 <div style={{fontSize:12,color:'var(--text-dimmer)',letterSpacing:1,marginBottom:14,fontWeight:500}}>SE ANALIZARÁ EN 9 BLOQUES</div>
 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px 16px'}}>
 {BLOCKS.map((b,i)=><div key={b} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'var(--text-dim)'}}><span style={{color:'var(--gold)',fontFamily:'monospace',fontSize:11}}>{i+1}</span>{b}</div>)}</div></div>
 <button className="btn btn-gold" onClick={startAnalysis} disabled={!pdfFile||!projectName.trim()} style={{width:'100%',justifyContent:'center',padding:'14px',fontSize:16,opacity:(!pdfFile||!projectName.trim())?0.4:1}}>
 🔍 Iniciar análisis</button></div></div>)
+
 return(
 <div style={{height:'100vh',display:'flex',flexDirection:'column',background:'var(--dark)'}}>
 <nav style={{height:56,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 20px',background:'var(--dark2)',borderBottom:'1px solid var(--border)',flexShrink:0}}>
@@ -109,6 +145,7 @@ return(
 {hasReport&&!saved&&<button className="btn btn-gold" style={{padding:'6px 16px',fontSize:13}} onClick={saveReport}>Guardar</button>}
 {saved&&<span style={{fontSize:13,color:'var(--green)'}}>✓ Guardado</span>}
 <span style={{fontWeight:700,fontSize:18,letterSpacing:2,color:'var(--gold)'}}>SQC SCOPE</span></div></nav>
+{uploadProgress&&<div style={{padding:'12px 20px',background:'var(--gold-bg)',color:'var(--gold)',fontSize:13,textAlign:'center',borderBottom:'1px solid var(--border-gold)'}}>{uploadProgress}</div>}
 <div style={{flex:1,overflowY:'auto',padding:'24px 0'}}>
 <div style={{maxWidth:800,margin:'0 auto',padding:'0 20px',display:'flex',flexDirection:'column',gap:20}}>
 {messages.map((msg,i)=>(
