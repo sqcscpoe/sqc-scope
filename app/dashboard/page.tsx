@@ -30,7 +30,7 @@ return(<div style={{minHeight:'100vh',background:'var(--dark)'}}>
 <div style={{maxWidth:1100,margin:'0 auto',padding:'32px 24px'}}>
 <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:32}}>
 <div><h1 style={{fontSize:28,fontWeight:600,marginBottom:4}}>Proyectos</h1>
-<p style={{fontSize:14,color:'var(--text-dim)'}}>Historial de revisiones M1 — {company}</p></div>
+<p style={{fontSize:14,color:'var(--text-dim)'}}>Historial de revisiones — {company}</p></div>
 <button className="btn btn-gold" onClick={()=>router.push('/review')}>+ Nueva revisión</button></div>
 <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:32}}>
 {[{label:'Total',value:stats.total,color:'var(--text)'},{label:'Aprobados',value:stats.aprobados,color:'var(--green)'},{label:'Rechazados',value:stats.rechazados,color:'var(--orange)'},{label:'Descalificados',value:stats.dq,color:'var(--red)'}].map(s=>(
