@@ -1,7 +1,7 @@
 import type{Metadata}from'next'
 import'./globals.css'
 import{Providers}from'./providers'
-export const metadata:Metadata={title:'SQC Scope — Solar Quality Control',description:'Palmetto LightReach PR — Revisión de Instalaciones M1'}
+export const metadata:Metadata={title:'SQC Scope — Solar Quality Control',description:'Sistema de revisión de calidad de instalaciones solares'}
 export default function RootLayout({children}:{children:React.ReactNode}){
 return(<html lang="es"><head>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
