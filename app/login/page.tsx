@@ -18,8 +18,7 @@ return(<div style={{minHeight:'100vh',display:'flex',alignItems:'center',justify
 <div style={{fontFamily:'monospace',fontSize:42,letterSpacing:3,color:'var(--gold)',lineHeight:1,fontWeight:700}}>SQC SCOPE</div>
 <div style={{fontSize:12,color:'var(--text-dimmer)',letterSpacing:4,marginTop:4}}>SOLAR QUALITY CONTROL</div></div>
 <div style={{background:'var(--dark2)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',padding:32}}>
-<h2 style={{fontSize:18,fontWeight:600,marginBottom:6}}>Iniciar sesión</h2>
-<p style={{fontSize:13,color:'var(--text-dim)',marginBottom:28}}>Palmetto LightReach PR — Revisión M1</p>
+<h2 style={{fontSize:18,fontWeight:600,marginBottom:28}}>Iniciar sesión</h2>
 <form onSubmit={handleSubmit} style={{display:'flex',flexDirection:'column',gap:16}}>
 <div><label style={{display:'block',fontSize:12,color:'var(--text-dim)',marginBottom:6,fontWeight:500}}>EMAIL</label>
 <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required autoFocus placeholder="tu@empresa.com"
