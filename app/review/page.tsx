@@ -9,7 +9,7 @@ const router=useRouter()
 const[messages,setMessages]=useState<any[]>([])
 const[input,setInput]=useState('')
 const[pdfFile,setPdfFile]=useState<File|null>(null)
-const[pdfBase64,setPdfBase64]=useState<string|null>(null)
+const[pdfFileId,setPdfFileId]=useState<string|null>(null)
 const[projectName,setProjectName]=useState('')
 const[loading,setLoading]=useState(false)
 const[saved,setSaved]=useState(false)
@@ -21,11 +21,8 @@ useEffect(()=>{if(status==='unauthenticated')router.push('/login')},[status,rout
 useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:'smooth'})},[messages])
 function handleFile(file:File){
 if(!file||file.type!=='application/pdf')return
-setPdfFile(file)
-const reader=new FileReader()
-reader.onload=ev=>setPdfBase64((ev.target?.result as string).split(',')[1])
-reader.readAsDataURL(file)}
-async function startAnalysis(){if(!pdfBase64||!projectName.trim())return;setPhase('chat');await send('REVISAR PAQUETE',true)}
+setPdfFile(file)}
+async function startAnalysis(){if(!pdfFile||!projectName.trim())return;setPhase('chat');await send('REVISAR PAQUETE',true)}
 async function send(text?:string,withPdf=false){
 const msg=text||input.trim();if(!msg||loading)return
 setInput('');setLoading(true)
@@ -34,14 +31,34 @@ const asstMsg={role:'assistant',content:'',streaming:true}
 setMessages(prev=>[...prev,userMsg,asstMsg])
 const history=messages.map(m=>({role:m.role,content:m.content}))
 try{
-const res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
-body:JSON.stringify({message:msg,pdfBase64:withPdf?pdfBase64:undefined,pdfName:pdfFile?.name,history})})
+let res
+if(withPdf&&pdfFile){
+const fd=new FormData()
+fd.append('pdf',pdfFile)
+fd.append('message',msg)
+fd.append('history',JSON.stringify(history))
+res=await fetch('/api/analyze',{method:'POST',body:fd})
+}else{
+res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+body:JSON.stringify({message:msg,history,pdfFileId})})
+}
 if(!res.ok)throw new Error(await res.text())
-const reader=res.body!.getReader();const decoder=new TextDecoder();let full=''
-while(true){const{done,value}=await reader.read();if(done)break;full+=decoder.decode(value,{stream:true})
-setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:full,streaming:true};return u})}
-setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:full,streaming:false};return u})
-if(full.includes('---FIN_REPORTE---'))setHasReport(true)
+const reader=res.body!.getReader();const decoder=new TextDecoder();let full='';let displayed=''
+while(true){const{done,value}=await reader.read();if(done)break
+const chunk=decoder.decode(value,{stream:true})
+full+=chunk
+// Extract __FILE_ID__:xxx__ if present
+const fileIdMatch=full.match(/__FILE_ID__:([^_]+)__\n?/)
+if(fileIdMatch&&!pdfFileId){
+setPdfFileId(fileIdMatch[1])
+displayed=full.replace(/__FILE_ID__:[^_]+__\n?/,'')
+}else{
+displayed=full.replace(/__FILE_ID__:[^_]+__\n?/,'')
+}
+setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:displayed,streaming:true};return u})}
+const finalContent=full.replace(/__FILE_ID__:[^_]+__\n?/,'')
+setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:finalContent,streaming:false};return u})
+if(finalContent.includes('---FIN_REPORTE---'))setHasReport(true)
 }catch(err:any){setMessages(prev=>{const u=[...prev];u[u.length-1]={role:'assistant',content:'Error: '+err.message,streaming:false};return u})}
 finally{setLoading(false)}}
 async function saveReport(){
@@ -74,7 +91,7 @@ style={{width:'100%',padding:'12px 16px',background:'var(--dark2)',border:'1px s
 style={{border:`2px dashed ${pdfFile?'var(--gold)':'var(--border)'}`,borderRadius:'var(--radius-lg)',padding:'48px 32px',textAlign:'center',cursor:'pointer',marginBottom:24,background:pdfFile?'var(--gold-bg)':'var(--dark2)',transition:'all 0.2s'}}>
 <input ref={fileRef} type="file" accept="application/pdf" onChange={e=>e.target.files&&handleFile(e.target.files[0])} style={{display:'none'}}/>
 {pdfFile?(<><div style={{fontSize:36,marginBottom:8}}>📄</div><div style={{fontSize:15,fontWeight:500,color:'var(--gold)',marginBottom:4}}>{pdfFile.name}</div><div style={{fontSize:13,color:'var(--text-dim)'}}>{(pdfFile.size/1024/1024).toFixed(1)} MB · Click para cambiar</div></>)
-:(<><div style={{fontSize:36,marginBottom:12}}>☁️</div><div style={{fontSize:16,fontWeight:500,marginBottom:8}}>Arrastra el Site Capture PDF aquí</div><div style={{fontSize:13,color:'var(--text-dim)'}}>o haz click para seleccionar</div><div style={{fontSize:12,color:'var(--text-dimmer)',marginTop:8}}>PDF · hasta 50MB</div></>)}</div>
+:(<><div style={{fontSize:36,marginBottom:12}}>☁️</div><div style={{fontSize:16,fontWeight:500,marginBottom:8}}>Arrastra el Site Capture PDF aquí</div><div style={{fontSize:13,color:'var(--text-dim)'}}>o haz click para seleccionar</div><div style={{fontSize:12,color:'var(--text-dimmer)',marginTop:8}}>PDF · hasta 100MB</div></>)}</div>
 <div style={{background:'var(--dark2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,marginBottom:28}}>
 <div style={{fontSize:12,color:'var(--text-dimmer)',letterSpacing:1,marginBottom:14,fontWeight:500}}>SE ANALIZARÁ EN 9 BLOQUES</div>
 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px 16px'}}>
