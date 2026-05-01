@@ -64,8 +64,8 @@ if(phase==='upload')return(
 <span style={{fontWeight:700,fontSize:20,letterSpacing:2,color:'var(--gold)'}}>SQC SCOPE</span>
 <div style={{width:80}}/></nav>
 <div style={{maxWidth:640,margin:'60px auto',padding:'0 24px'}} className="fade-up">
-<h1 style={{fontSize:28,fontWeight:600,marginBottom:6}}>Nueva revisión M1</h1>
-<p style={{color:'var(--text-dim)',marginBottom:32,fontSize:14}}>Sube el PDF del Site Capture para analizar la instalación contra los estándares de Palmetto LightReach PR.</p>
+<h1 style={{fontSize:28,fontWeight:600,marginBottom:6}}>Nueva revisión</h1>
+<p style={{color:'var(--text-dim)',marginBottom:32,fontSize:14}}>Sube el PDF del Site Capture para analizar la instalación.</p>
 <div style={{marginBottom:20}}>
 <label style={{display:'block',fontSize:12,color:'var(--text-dim)',marginBottom:8,fontWeight:500,letterSpacing:1}}>NOMBRE DEL PROYECTO / DIRECCIÓN</label>
 <input value={projectName} onChange={e=>setProjectName(e.target.value)} placeholder="Ej: Juan García — Calle Sol 45, Bayamón"
