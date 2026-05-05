@@ -3,6 +3,7 @@ import{useState,useRef,useEffect}from'react'
 import{useSession}from'next-auth/react'
 import{useRouter}from'next/navigation'
 const BLOCKS=['Techo y arreglos','Cableado y tubería','Junction box','Perforaciones','Equipo eléctrico','Gateway / Inversor','Batería y RSS','Medidas críticas','Números de serie']
+const MAX_PDF_SIZE_MB=30
 
 export default function ReviewPage(){
 const{data:session,status}=useSession()
@@ -12,6 +13,7 @@ const[input,setInput]=useState('')
 const[pdfFile,setPdfFile]=useState<File|null>(null)
 const[pdfFileId,setPdfFileId]=useState<string|null>(null)
 const[uploadProgress,setUploadProgress]=useState<string>('')
+const[fileError,setFileError]=useState<string>('')
 const[projectName,setProjectName]=useState('')
 const[loading,setLoading]=useState(false)
 const[saved,setSaved]=useState(false)
@@ -24,16 +26,22 @@ useEffect(()=>{if(status==='unauthenticated')router.push('/login')},[status,rout
 useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:'smooth'})},[messages])
 
 function handleFile(file:File){
-if(!file||file.type!=='application/pdf')return
+setFileError('')
+if(!file)return
+if(file.type!=='application/pdf'){setFileError('El archivo debe ser un PDF');return}
+const sizeMB=file.size/1024/1024
+if(sizeMB>MAX_PDF_SIZE_MB){
+setFileError('El PDF es muy grande ('+sizeMB.toFixed(1)+' MB). Máximo: '+MAX_PDF_SIZE_MB+' MB. Comprime el PDF en https://www.ilovepdf.com/compress_pdf antes de subirlo.')
+return}
 setPdfFile(file)}
 
 async function uploadPdfToAnthropic(file:File):Promise<string>{
-setUploadProgress('Obteniendo token...')
+setUploadProgress('Obteniendo credenciales...')
 const tokenRes=await fetch('/api/upload-token')
-if(!tokenRes.ok)throw new Error('No se pudo obtener token')
+if(!tokenRes.ok)throw new Error('No se pudo obtener credenciales')
 const{apiKey}=await tokenRes.json()
 
-setUploadProgress('Subiendo PDF a Anthropic ('+(file.size/1024/1024).toFixed(1)+' MB)...')
+setUploadProgress('Subiendo PDF a Anthropic ('+(file.size/1024/1024).toFixed(1)+' MB)... esto puede tardar 1-2 minutos')
 const fd=new FormData()
 fd.append('file',file)
 const uploadRes=await fetch('https://api.anthropic.com/v1/files',{
@@ -43,9 +51,9 @@ body:fd
 })
 if(!uploadRes.ok){
 const err=await uploadRes.text()
-throw new Error('Error subiendo: '+err.slice(0,200))}
+throw new Error('Error del servidor: '+err.slice(0,200))}
 const data=await uploadRes.json()
-setUploadProgress('')
+setUploadProgress('PDF subido. Iniciando análisis...')
 return data.id}
 
 async function startAnalysis(){
@@ -55,14 +63,16 @@ setLoading(true)
 try{
 const fileId=await uploadPdfToAnthropic(pdfFile)
 setPdfFileId(fileId)
+setUploadProgress('')
 await send('REVISAR PAQUETE',fileId)
 }catch(err:any){
-setMessages([{role:'assistant',content:'Error subiendo PDF: '+err.message,streaming:false}])
+setUploadProgress('')
+setMessages([{role:'assistant',content:'Error subiendo PDF: '+err.message+'\n\nPosibles causas:\n• PDF muy grande (máx 30 MB)\n• Conexión inestable\n• El archivo está corrupto\n\nIntenta comprimir el PDF en ilovepdf.com/compress_pdf',streaming:false}])
 setLoading(false)}}
 
 async function send(text?:string,fileIdOverride?:string){
 const msg=text||input.trim()
-if(!msg||(loading&&!fileIdOverride))return
+if(!msg)return
 setInput('')
 setLoading(true)
 
@@ -123,14 +133,17 @@ if(phase==='upload')return(
 <input value={projectName} onChange={e=>setProjectName(e.target.value)} placeholder="Ej: Juan García — Calle Sol 45, Bayamón"
 style={{width:'100%',padding:'12px 16px',background:'var(--dark2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',color:'var(--text)',fontFamily:'var(--font-body)',fontSize:15,outline:'none'}}/></div>
 <div onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();handleFile(e.dataTransfer.files[0])}} onClick={()=>fileRef.current?.click()}
-style={{border:`2px dashed ${pdfFile?'var(--gold)':'var(--border)'}`,borderRadius:'var(--radius-lg)',padding:'48px 32px',textAlign:'center',cursor:'pointer',marginBottom:24,background:pdfFile?'var(--gold-bg)':'var(--dark2)',transition:'all 0.2s'}}>
+style={{border:`2px dashed ${fileError?'var(--red)':pdfFile?'var(--gold)':'var(--border)'}`,borderRadius:'var(--radius-lg)',padding:'48px 32px',textAlign:'center',cursor:'pointer',marginBottom:fileError?12:24,background:pdfFile?'var(--gold-bg)':'var(--dark2)',transition:'all 0.2s'}}>
 <input ref={fileRef} type="file" accept="application/pdf" onChange={e=>e.target.files&&handleFile(e.target.files[0])} style={{display:'none'}}/>
 {pdfFile?(<><div style={{fontSize:36,marginBottom:8}}>📄</div><div style={{fontSize:15,fontWeight:500,color:'var(--gold)',marginBottom:4}}>{pdfFile.name}</div><div style={{fontSize:13,color:'var(--text-dim)'}}>{(pdfFile.size/1024/1024).toFixed(1)} MB · Click para cambiar</div></>)
-:(<><div style={{fontSize:36,marginBottom:12}}>☁️</div><div style={{fontSize:16,fontWeight:500,marginBottom:8}}>Arrastra el Site Capture PDF aquí</div><div style={{fontSize:13,color:'var(--text-dim)'}}>o haz click para seleccionar</div><div style={{fontSize:12,color:'var(--text-dimmer)',marginTop:8}}>PDF · sin límite de tamaño</div></>)}</div>
+:(<><div style={{fontSize:36,marginBottom:12}}>☁️</div><div style={{fontSize:16,fontWeight:500,marginBottom:8}}>Arrastra el Site Capture PDF aquí</div><div style={{fontSize:13,color:'var(--text-dim)'}}>o haz click para seleccionar</div><div style={{fontSize:12,color:'var(--text-dimmer)',marginTop:8}}>PDF · máximo 30 MB</div></>)}</div>
+{fileError&&<div style={{padding:'12px 16px',background:'rgba(229,57,53,0.1)',border:'1px solid rgba(229,57,53,0.3)',borderRadius:'var(--radius)',marginBottom:24,fontSize:13,color:'var(--red)',lineHeight:1.5}}>{fileError}</div>}
 <div style={{background:'var(--dark2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,marginBottom:28}}>
 <div style={{fontSize:12,color:'var(--text-dimmer)',letterSpacing:1,marginBottom:14,fontWeight:500}}>SE ANALIZARÁ EN 9 BLOQUES</div>
 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px 16px'}}>
 {BLOCKS.map((b,i)=><div key={b} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'var(--text-dim)'}}><span style={{color:'var(--gold)',fontFamily:'monospace',fontSize:11}}>{i+1}</span>{b}</div>)}</div></div>
+<div style={{background:'var(--dark2)',border:'1px solid var(--border-gold)',borderRadius:'var(--radius)',padding:'14px 16px',marginBottom:24,fontSize:12,color:'var(--text-dim)',lineHeight:1.6}}>
+<strong style={{color:'var(--gold)'}}>💡 Si tu PDF es mayor a 30 MB:</strong> Compriélo gratis en <a href="https://www.ilovepdf.com/compress_pdf" target="_blank" style={{color:'var(--gold)',textDecoration:'underline'}}>ilovepdf.com/compress_pdf</a> seleccionando "Recommended Compression"</div>
 <button className="btn btn-gold" onClick={startAnalysis} disabled={!pdfFile||!projectName.trim()} style={{width:'100%',justifyContent:'center',padding:'14px',fontSize:16,opacity:(!pdfFile||!projectName.trim())?0.4:1}}>
 🔍 Iniciar análisis</button></div></div>)
 
